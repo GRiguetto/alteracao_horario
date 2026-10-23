@@ -109,6 +109,8 @@ fieldset.sched>legend{font-weight:600;font-size:.9rem;padding:0;margin-bottom:6p
 .rulechk .dt{display:block;color:var(--muted)}
 .rulechk li.ok{background:var(--ok-bg)}.rulechk li.ok .ic{background:var(--ok);color:var(--surface)}.rulechk li.ok .st{color:var(--ok)}
 .rulechk li.bad{background:var(--bad-bg)}.rulechk li.bad .ic{background:var(--bad);color:var(--surface)}.rulechk li.bad .st{color:var(--bad)}
+.xbrk{margin-top:10px}
+[hidden]{display:none!important}
 .sum{margin:8px 0 0;font-size:.85rem;color:var(--muted)}
 .cross{margin:0;padding:10px 12px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-weight:600;font-size:.88rem;display:none}
 .cross.on{display:block}
@@ -238,7 +240,7 @@ fieldset.sched>legend{font-weight:600;font-size:.9rem;padding:0;margin-bottom:6p
 
     <section class="card" aria-labelledby="h-tipo">
       <h2 id="h-tipo">Tipo de alteração</h2>
-      <p class="lead">Escolha um único tipo marcando o quadrado com X. Os outros ficam desativados até você desmarcar. Os campos abrem ao marcar.</p>
+      <p class="lead">Marque com X cada tipo que deseja solicitar; é possível escolher mais de um. Os campos abrem ao marcar e só os tipos marcados saem no PDF.</p>
 
       <div class="opt" id="opt-def">
         <label class="opt-head" for="chk-def">
@@ -270,7 +272,7 @@ fieldset.sched>legend{font-weight:600;font-size:.9rem;padding:0;margin-bottom:6p
           <div class="cross" id="cross-dia" role="status"></div>
         </div>
       </div>
-      <p class="err" id="err-tipo" role="alert">Marque um tipo de alteração.</p>
+      <p class="err" id="err-tipo" role="alert">Marque pelo menos um tipo de alteração.</p>
       <div class="cross" id="cross-glob" role="status" style="margin-top:12px"></div>
     </section>
 
@@ -379,16 +381,21 @@ function hm(min){ var neg=min<0; min=Math.abs(min); return (neg?'-':'')+Math.flo
 function fmtMin(m){ m=((m%1440)+1440)%1440; return ('0'+Math.floor(m/60)).slice(-2)+':'+('0'+(m%60)).slice(-2); }
 
 /* Analisa uma jornada: a/b/c/d em minutos. Devolve null se incompleta. */
+function hasX(p){ var fs=document.getElementById(p+'-sch'); return !!(fs&&fs.getAttribute('data-x')==='1'); }
+function timeIds(p){ return hasX(p)?['a','b','c','x','y','d']:['a','b','c','d']; }
 function analyze(p){
-  var t=[]; for(var i=0;i<4;i++){ var x=parseTime(document.getElementById(p+'-'+'abcd'[i]).value); if(x==null) return null; t.push(x); }
+  var keys=timeIds(p), t=[], i;
+  for(i=0;i<keys.length;i++){ var x=parseTime(document.getElementById(p+'-'+keys[i]).value); if(x==null) return null; t.push(x); }
   var u=[t[0]], zero=false;
-  for(i=1;i<4;i++){ if(t[i]===t[i-1]){ zero=true; u.push(t[i]); } else u.push(t[i]<u[i-1]? t[i]+1440*Math.ceil((u[i-1]-t[i])/1440) : t[i]); }
-  var r={t:t,u:u,w1:u[1]-u[0],brk:u[2]-u[1],w2:u[3]-u[2],span:u[3]-u[0],zero:zero};
-  r.start=t[0]; r.end=u[3];
+  for(i=1;i<t.length;i++){ if(t[i]===t[i-1]){ zero=true; u.push(t[i]); } else u.push(t[i]<u[i-1]? t[i]+1440*Math.ceil((u[i-1]-t[i])/1440) : t[i]); }
+  var works=[], brks=[];
+  for(i=0;i<u.length-1;i++){ (i%2===0?works:brks).push(u[i+1]-u[i]); }
+  var r={t:t,u:u,works:works,brks:brks,span:u[u.length-1]-u[0],zero:zero};
+  r.start=t[0]; r.end=u[u.length-1];
   r.structural = zero ? 'Há dois horários seguidos iguais. Cada período precisa ter duração maior que zero.' : (r.span>=1440 ? 'A jornada, da entrada à saída, passa de 24 horas.' : '');
   r.rest = 1440 - r.span;
-  r.ok6 = r.w1<=360 && r.w2<=360;
-  r.ok1 = r.brk>=60;
+  r.ok6 = works.every(function(w){return w<=360});
+  r.ok1 = brks.every(function(b){return b>=60});
   r.ok11 = r.rest>=660;
   r.valid = !r.structural && r.ok6 && r.ok1 && r.ok11;
   return r;
@@ -396,24 +403,32 @@ function analyze(p){
 
 /* ---------- Componentes de formulário ---------- */
 function schedHTML(p){
-  function tf(l,k,lab){ return '<div class="tf"><label for="'+p+'-'+k+'">'+lab+' <span class="req" aria-hidden="true">*</span></label><input id="'+p+'-'+k+'" type="text" class="mono" inputmode="numeric" data-kind="time" maxlength="5" placeholder="HH:MM" aria-required="true" aria-describedby="'+p+'-terr" autocomplete="off"></div>'; }
+  function tf(l,k,lab,x){ return '<div class="tf'+(x?' x':'')+'"'+(x?' hidden':'')+'><label for="'+p+'-'+k+'">'+lab+' <span class="req" aria-hidden="true">*</span></label><input id="'+p+'-'+k+'" type="text" class="mono" inputmode="numeric" data-kind="time" maxlength="5" placeholder="HH:MM" aria-required="true" aria-describedby="'+p+'-terr" autocomplete="off"></div>'; }
   return '<fieldset class="sched" id="'+p+'-sch"><legend>Novo horário de trabalho com intervalo</legend>'+
-    '<div class="times">'+tf(p,'a','Entrada')+'<span class="sep" aria-hidden="true">/</span>'+tf(p,'b','Saída p/ intervalo')+'<span class="sep" aria-hidden="true">às</span>'+tf(p,'c','Retorno do intervalo')+'<span class="sep" aria-hidden="true">/</span>'+tf(p,'d','Saída')+'</div>'+
-    '<p class="hint">Exemplo: 07:00 / 11:00 às 12:00 / 16:00. Digite só os números; os dois-pontos entram sozinhos.</p>'+
+    '<div class="times">'+tf(p,'a','Entrada')+'<span class="sep" aria-hidden="true">/</span>'+tf(p,'b','Saída p/ intervalo')+'<span class="sep" aria-hidden="true">às</span>'+tf(p,'c','Retorno do intervalo')+'<span class="sep x" aria-hidden="true" hidden>/</span>'+tf(p,'x','Saída p/ 2º intervalo',1)+'<span class="sep x" aria-hidden="true" hidden>às</span>'+tf(p,'y','Retorno do 2º intervalo',1)+'<span class="sep" aria-hidden="true">/</span>'+tf(p,'d','Saída')+'</div>'+
+    '<div class="xbrk"><button type="button" class="btn sm" data-addx="'+p+'">+ Adicionar segundo intervalo</button><button type="button" class="btn sm danger" data-remx="'+p+'" hidden>Remover segundo intervalo</button></div>'+
+    '<p class="hint">Exemplo: 07:00 / 11:00 às 12:00 / 16:00. Quem faz dois intervalos usa o botão acima. Digite só os números; os dois-pontos entram sozinhos.</p>'+
     '<p class="err" id="'+p+'-terr" role="alert"></p>'+
     '<ul class="rulechk" id="'+p+'-rules" aria-label="Verificação das regras de horário">'+
       '<li data-r="6"><span class="ic" aria-hidden="true">·</span><span class="tx"><span class="nm">Regra III · Trabalho contínuo de no máximo 6 h</span> — <span class="st">aguardando horários</span><span class="dt"></span></span></li>'+
-      '<li data-r="1"><span class="ic" aria-hidden="true">·</span><span class="tx"><span class="nm">Regra III · Intervalo de pelo menos 1 h</span> — <span class="st">aguardando horários</span><span class="dt"></span></span></li>'+
+      '<li data-r="1"><span class="ic" aria-hidden="true">·</span><span class="tx"><span class="nm">Regra III · Cada intervalo de pelo menos 1 h</span> — <span class="st">aguardando horários</span><span class="dt"></span></span></li>'+
       '<li data-r="11"><span class="ic" aria-hidden="true">·</span><span class="tx"><span class="nm">Regra II · Descanso de pelo menos 11 h até a próxima jornada</span> — <span class="st">aguardando horários</span><span class="dt"></span></span></li>'+
     '</ul><p class="sum" id="'+p+'-sum"></p></fieldset>';
 }
 function regSched(p, scope, nameFn){
-  var labs={a:'Entrada',b:'Saída para intervalo',c:'Retorno do intervalo',d:'Saída'};
-  'abcd'.split('').forEach(function(k){
-    var id=p+'-'+k;
-    F[id]={el:document.getElementById(id), err:null, scope:scope, kind:'time', optional:false, label:labs[k], sched:p,
+  var labs={a:'Entrada',b:'Saída para intervalo',c:'Retorno do intervalo',x:'Saída para o 2º intervalo',y:'Retorno do 2º intervalo',d:'Saída'};
+  'abcxyd'.split('').forEach(function(k){
+    var id=p+'-'+k, extra=(k==='x'||k==='y');
+    F[id]={el:document.getElementById(id), err:null, scope:extra?function(){return scope()&&hasX(p)}:scope, kind:'time', optional:false, label:labs[k], sched:p,
       name:function(){return nameFn()+' – '+labs[k]}};
   });
+}
+function setX(p,on){
+  var fs=document.getElementById(p+'-sch'); if(!fs) return;
+  fs.setAttribute('data-x',on?'1':'0');
+  fs.querySelectorAll('.x').forEach(function(e){ e.hidden=!on; });
+  fs.querySelector('[data-addx]').hidden=on; fs.querySelector('[data-remx]').hidden=!on;
+  if(!on){ ['x','y'].forEach(function(k){ var i=document.getElementById(p+'-'+k); if(i){ i.value=''; delete touched[i.id]; } }); }
 }
 function addMotivo(host,p,scope,nameFn){
   var f=mkField({id:p+'-mot',label:'Motivo',area:true,maxlen:300,hint:'Explique brevemente o motivo da alteração.'});
@@ -425,7 +440,7 @@ function addMotivo(host,p,scope,nameFn){
   var g=$('#grid-id');
   var defs=[
     {id:'h-data',label:'Data do relatório',kind:'date',cls:'col-4',maxlen:10,ph:'dd/mm/aaaa',mode:'numeric',hint:'São José do Rio Preto,'},
-    {id:'h-sigm',label:'SIGM',kind:'mat',cls:'col-4',maxlen:15,hint:'Números, letras, ponto e hífen.'},
+    {id:'h-sigm',label:'SIGM',kind:'mat',cls:'col-4',maxlen:15,optional:true,hint:'Número do SIGM, se houver.'},
     {id:'h-uni',label:'Unidade',kind:'text',cls:'col-12',maxlen:90,ph:'Ex.: UBS Central'},
     {id:'h-nome',label:'Nome do servidor',kind:'name',cls:'col-12',maxlen:80,ph:'Nome completo',hint:'Somente letras.'},
     {id:'h-cargo',label:'Cargo',kind:'text',cls:'col-8',maxlen:60},
@@ -567,14 +582,16 @@ function updateSched(p){
     terr.textContent=a.structural; terr.classList.add('on'); sum.textContent=''; return a;
   }
   terr.textContent=''; terr.classList.remove('on');
-  set(items[0], a.ok6?'ok':'bad', a.ok6?'cumprida':'não cumprida',
-    'Período 1: '+hm(a.w1)+' · Período 2: '+hm(a.w2)+(a.ok6?'':'. Reduza o período que passa de 6h00 (excesso: '+hm(Math.max(a.w1-360,0)+Math.max(a.w2-360,0))+') ou antecipe a saída para o intervalo.'));
-  set(items[1], a.ok1?'ok':'bad', a.ok1?'cumprida':'não cumprida',
-    'Intervalo: '+hm(a.brk)+(a.ok1?'':'. Faltam '+hm(60-a.brk)+' para o mínimo de 1h00.'));
+  var wtxt=a.works.map(function(w,i){return 'Período '+(i+1)+': '+hm(w)}).join(' · ');
+  var over=a.works.reduce(function(s,w){return s+Math.max(w-360,0)},0);
+  set(items[0], a.ok6?'ok':'bad', a.ok6?'cumprida':'não cumprida', wtxt+(a.ok6?'':'. Reduza o período que passa de 6h00 (excesso: '+hm(over)+') ou antecipe a saída para o intervalo.'));
+  var btxt=a.brks.map(function(b,i){return (a.brks.length>1?'Intervalo '+(i+1):'Intervalo')+': '+hm(b)}).join(' · ');
+  var lack=Math.max.apply(null,a.brks.map(function(b){return 60-b}));
+  set(items[1], a.ok1?'ok':'bad', a.ok1?'cumprida':'não cumprida', btxt+(a.ok1?'':'. Faltam '+hm(lack)+' para o mínimo de 1h00.'));
   var maxspan=1440-660;
   set(items[2], a.ok11?'ok':'bad', a.ok11?'cumprida':'não cumprida',
     'Descanso até a próxima jornada: '+hm(a.rest)+(a.ok11?'':'. Faltam '+hm(660-a.rest)+' para 11h00; da entrada à saída a jornada pode ter no máximo '+hm(maxspan)+'.'));
-  var work=a.w1+a.w2, cross = a.end>=1440?' A saída é no dia seguinte.':'';
+  var work=a.works.reduce(function(s,w){return s+w},0), cross = a.end>=1440?' A saída é no dia seguinte.':'';
   sum.textContent='Tempo trabalhado: '+hm(work)+' · Da entrada à saída: '+hm(a.span)+'.'+cross;
   return a;
 }
@@ -617,8 +634,6 @@ function refresh(){
   var agree=$('#chk-agree').checked;
   $('#err-agree').classList.toggle('on',!agree&&attempted);
   $('#agree-box').classList.toggle('on',agree); $('#agree-box').classList.toggle('badbox',!agree&&attempted);
-  var sel=['def','per','dia'].filter(function(k){return $('#chk-'+k).checked});
-  ['def','per','dia'].forEach(function(k){ var c=$('#chk-'+k), lock=sel.length>0&&sel.indexOf(k)<0; c.disabled=lock; $('#opt-'+k).classList.toggle('off',lock); var sub=$('#opt-'+k+' .opt-sub'); if(!sub.hasAttribute('data-o')) sub.setAttribute('data-o',sub.textContent); sub.textContent=lock?'Indisponível: desmarque o tipo escolhido para trocar.':sub.getAttribute('data-o'); });
   ['def','per','dia'].forEach(function(k){ var on=$('#chk-'+k).checked; $('#opt-'+k).classList.toggle('on',on); $('#body-'+k).hidden=!on; $('#chk-'+k).setAttribute('aria-expanded',on?'true':'false'); });
   var issues=collectIssues(), st=$('#status'), btn=$('#btn-pdf');
   if(issues.length===0){ st.className='status ready'; st.innerHTML='Tudo certo.<small>Gere o PDF, imprima e colete as assinaturas.</small>'; btn.setAttribute('aria-disabled','false'); }
@@ -634,12 +649,14 @@ var form=$('#form');
 form.addEventListener('input',function(e){ var t=e.target; if(t.matches&&t.matches('input[type=text],textarea')){ applyMask(t); } refresh(); });
 form.addEventListener('focusout',function(e){ var t=e.target; if(t.id){ touched[t.id]=true; if(t.id.match(/^(def|per|d\d+)-[abcd]$/)){ /* mostra erros de formato */ } refresh(); } });
 form.addEventListener('change',function(e){ if(e.target.type==='checkbox'){ refresh(); } });
+form.addEventListener('click',function(e){ var b=e.target.closest&&e.target.closest('[data-addx],[data-remx]'); if(!b) return; var add=b.hasAttribute('data-addx'), p=b.getAttribute(add?'data-addx':'data-remx'); setX(p,add); refresh(); var f=document.getElementById(p+(add?'-x':'-d')); if(f) f.focus(); });
 form.addEventListener('submit',function(e){ e.preventDefault(); });
 $('#add-day').addEventListener('click',function(){ var p=addDay(); refresh(); document.getElementById(p+'-data').focus(); });
 $('#pend-list').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; var el=document.getElementById(b.getAttribute('data-id')); if(el){ el.scrollIntoView({block:'center'}); el.focus(); } });
 $('#btn-clear').addEventListener('click',function(){ $('#btn-clear').style.display='none'; $('#clear-confirm').classList.add('on'); $('#clear-no').focus(); });
 $('#clear-no').addEventListener('click',function(){ $('#clear-confirm').classList.remove('on'); $('#btn-clear').style.display=''; $('#btn-clear').focus(); });
 $('#clear-yes').addEventListener('click',function(){
+  document.querySelectorAll('fieldset.sched').forEach(function(fs){ setX(fs.id.replace('-sch',''),false); });
   form.querySelectorAll('input[type=text],textarea').forEach(function(i){ i.value=''; });
   form.querySelectorAll('input[type=checkbox]').forEach(function(i){ i.checked=false; });
   while(dayIds.length>1) removeDay(dayIds[dayIds.length-1]);
@@ -651,7 +668,7 @@ $('#clear-yes').addEventListener('click',function(){
 /* ---------- Folha de impressão ---------- */
 function v(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
 function blank(){ return '___:___ / ___:___ às ___:___ / ___:___'; }
-function schedTxt(p,on){ if(!on) return blank(); return esc(v(p+'-a'))+' / '+esc(v(p+'-b'))+' às '+esc(v(p+'-c'))+' / '+esc(v(p+'-d')); }
+function schedTxt(p,on){ if(!on) return blank(); var m=esc(v(p+'-a'))+' / '+esc(v(p+'-b'))+' às '+esc(v(p+'-c'))+' / '; if(hasX(p)) m+=esc(v(p+'-x'))+' às '+esc(v(p+'-y'))+' / '; return m+esc(v(p+'-d')); }
 function box(on){ return '<span class="cb">'+(on?'X':'')+'</span>'; }
 function buildSheet(){
   var def=$('#chk-def').checked, per=$('#chk-per').checked, dia=$('#chk-dia').checked;
@@ -662,16 +679,16 @@ function buildSheet(){
    '<div class="ln"><span class="lab">UNIDADE:</span><span class="v">'+esc(v('h-uni'))+'</span></div>'+
    '<div class="ln"><span class="lab">Nome do Servidor:</span><span class="v">'+esc(v('h-nome'))+'</span></div>'+
    '<div class="ln"><span class="lab">Cargo:</span><span class="v" style="flex:2">'+esc(v('h-cargo'))+'</span><span class="lab" style="margin-left:8mm">Matrícula:</span><span class="v">'+esc(v('h-mat'))+'</span></div>';
-  h+='<div class="bx"><div class="tt">'+box(def)+'<span>Definitivamente <span class="u">'+(def?esc(v('def-data')):'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+'</span></span></div>'+
+  if(def) h+='<div class="bx"><div class="tt">'+box(def)+'<span>Definitivamente <span class="u">'+(def?esc(v('def-data')):'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+'</span></span></div>'+
      '<div>Novo Horário de trabalho com Intervalo: <span class="u">'+schedTxt('def',def)+'</span></div><div class="mo">Motivo: '+(def?esc(v('def-mot')):'')+'</div></div>';
-  h+='<div class="bx"><div class="tt">'+box(per)+'<span>Provisório no período de <span class="u">'+(per?esc(v('per-ini'))+'</span> a <span class="u">'+esc(v('per-fim')):'&nbsp;__ /__/202__</span> a <span class="u">__/__/202___')+'</span></span></div>'+
+  if(per) h+='<div class="bx"><div class="tt">'+box(per)+'<span>Provisório no período de <span class="u">'+(per?esc(v('per-ini'))+'</span> a <span class="u">'+esc(v('per-fim')):'&nbsp;__ /__/202__</span> a <span class="u">__/__/202___')+'</span></span></div>'+
      '<div>Novo Horário de trabalho com Intervalo: <span class="u">'+schedTxt('per',per)+'</span></div><div class="mo">Motivo: '+(per?esc(v('per-mot')):'')+'</div></div>';
-  h+='<div class="bx"><div class="tt">'+box(dia)+'<span>Provisório dias:</span></div>';
-  var n=dia?Math.max(3,dayIds.length):3;
-  for(var i=0;i<n;i++){ var p=dia&&dayIds[i];
+  if(dia){ h+='<div class="bx"><div class="tt">'+box(dia)+'<span>Provisório dias:</span></div>';
+  var n=dayIds.length;
+  for(var i=0;i<n;i++){ var p=dayIds[i];
     h+='<div class="dn"><b>'+(i+1)+') <span class="u">'+(p?esc(v(p+'-data')):'___/___/______')+'</span></b>'+
        'Novo Horário de trabalho com Intervalo: <span class="u">'+(p?schedTxt(p,true):blank())+'</span><div class="mo">Motivo: '+(p?esc(v(p+'-mot')):'')+'</div></div>'; }
-  h+='</div>';
+  h+='</div>'; }
   h+='<div class="grp"><div class="cien">Ciente e de acordo com as orientações abaixo, assino o documento:</div>'+
      '<p class="rl">I. As trocas de horários devem obedecer ao interesse público e a carga horária semanal de contrato.<br>'+
      'II. Entre duas jornadas de trabalho haverá um período mínimo de <b><u>11 horas consecutivas para descanso</u></b>.<br>'+
